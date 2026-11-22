@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Arrima la chapa</title>
+<!--
+  «Arrima la chapa» (notas/juegos-mesa-2.md, 07/10/2026). La petanca de la Plaza Posavasos, con chapas y un guisante
+  de boliche. Por turnos, cada uno lanza una chapa desde la raya de abajo (arrastrar hacia atrás y soltar, como en
+  Chapa-Gol) para dejarla lo más cerca posible del guisante. Se puede «bochar» la del rival. Lo que se cae de la mesa
+  (o no pasa la raya) se lo queda Chapas, el vecino coleccionista, que narra en susurros.
+  Puntúa la ronda quien tenga la chapa más cerca: un punto por cada chapa suya más cerca que la mejor del resto.
+  Gana el primero en llegar a ARRIMA_CFG.puntosParaGanar.
+  De 2 a 4, pasando el móvil sin girarlo (todos tiran desde abajo) y, si se quiere, con vecinos de la máquina.
+  Premio FIJO al ganar una persona (ARRIMA_CFG.premioChapas), con el factor ARRIMA_CFG.premioModoDos si todos son
+  personas (como Chapa-Gol); tope por partida en src/utils/juegosDeMesa.js. Todo lo ajustable, en ARRIMA_CFG.
+  La lógica pura va entre «==LOGICA==» y se prueba en pruebas/juegosMesa2.test.js.
+  Fuente: este fichero; lo de la app lo genera `node scripts/juego.mjs arrima`.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+:root { --fondo: #17110c; --sup: #241a12; --sup2: #30241a; --borde: #4a3826; --texto: #f6ead8; --apoyo: #b9a68d;
+  --ambar: #f2a33a; --tinta: #2a1d12; --papel: #FFF9EE; --bien: #74c27a; --mal: #e0645c; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--fondo); color: var(--texto);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; overscroll-behavior: none; }
+body { display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.barra { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 4px; min-height: 48px; }
+.barra .titulo { font-family: 'Gochi Hand', cursive; font-size: 24px; color: var(--ambar); line-height: 1; white-space: nowrap; }
+.barra .meta { font-size: 13px; color: var(--apoyo); font-weight: 700; white-space: nowrap; }
+.mini { background: none; border: 1px solid var(--borde); color: var(--apoyo); border-radius: 99px; padding: 6px 12px;
+  font-size: 14px; font-weight: 700; }
+.marcador { display: flex; gap: 6px; margin: 2px 12px 4px; }
+.ficha { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 12px;
+  background: var(--sup); border: 2px solid transparent; opacity: .6; }
+.ficha.toca { opacity: 1; background: var(--sup2); }
+.ficha img { width: 24px; height: 24px; flex: none; }
+.marcador.cuatro .ficha img { display: none; }
+.marcador.cuatro .ficha { padding: 5px 6px; }
+.ficha .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.1; }
+.ficha .nom { font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ficha .quedan { font-size: 10px; letter-spacing: 1px; white-space: nowrap; }
+.ficha .pts { font-size: 18px; font-weight: 900; color: var(--ambar); }
+.bocadillo { margin: 2px 16px 4px; display: flex; gap: 10px; align-items: center; min-height: 60px; }
+.bocadillo img { width: 52px; height: 52px; flex: none; }
+.bocadillo .texto { position: relative; flex: 1; background: var(--papel); color: var(--tinta);
+  background-image: repeating-linear-gradient(transparent 0 21px, #bcd3ef 21px 22px);
+  border: 2px solid var(--tinta); border-radius: 14px; padding: 6px 12px 7px;
+  font-family: 'Patrick Hand', cursive; font-size: 18px; line-height: 22px; min-height: 64px; }
+.bocadillo .texto::before { content: ''; position: absolute; left: -9px; top: 18px; border: 8px solid transparent;
+  border-right-color: var(--tinta); border-left: 0; }
+.bocadillo .quien { font-family: 'Gochi Hand', cursive; font-size: 15px; color: #a0522d; display: block; line-height: 16px; }
+.escena { flex: 1; position: relative; min-height: 0; }
+.escena canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+.pie { padding: 4px 16px calc(env(safe-area-inset-bottom) + 10px); color: var(--apoyo); font-size: 15px;
+  text-align: center; min-height: 30px; }
+.pie b { color: var(--texto); }
+.btn { background: var(--ambar); color: var(--tinta); border: 0; border-radius: 14px; padding: 14px 18px; font-weight: 800;
+  font-size: 17px; box-shadow: 0 3px 0 #a86814; }
+.btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #a86814; }
+.btn.sec { background: var(--sup2); color: var(--texto); box-shadow: 0 3px 0 #0008; border: 1px solid var(--borde); }
+.capa { position: fixed; inset: 0; background: #0f0a06; display: none; flex-direction: column;
+  align-items: stretch; justify-content: flex-start; gap: 12px; padding: calc(env(safe-area-inset-top) + 40px) 20px
+  calc(env(safe-area-inset-bottom) + 20px); z-index: 10; overflow-y: auto; }
+.capa.ver { display: flex; }
+.capa h1 { font-family: 'Gochi Hand', cursive; color: var(--ambar); font-size: 42px; margin: 0; text-align: center;
+  line-height: 1; font-weight: 400; }
+.capa .sub { text-align: center; color: var(--apoyo); margin: -6px 0 0; font-size: 15px; }
+.capa .tarjeta { background: var(--sup); border: 1px solid var(--borde); border-radius: 18px; padding: 12px 14px;
+  font-size: 15px; line-height: 1.45; }
+.capa .tarjeta p { margin: 0 0 6px; }
+.capa .tarjeta p:last-child { margin: 0; }
+.capa .figs { display: flex; justify-content: center; gap: 6px; }
+.capa .figs img { width: 64px; height: 64px; }
+.opcion { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px; color: var(--apoyo); }
+.selector { display: flex; gap: 6px; }
+.selector button { background: var(--sup2); border: 1px solid var(--borde); color: var(--texto); border-radius: 10px;
+  padding: 8px 11px; font-size: 14px; font-weight: 700; }
+.selector button.si { background: var(--ambar); color: var(--tinta); border-color: var(--ambar); }
+.asientos { display: flex; flex-direction: column; gap: 8px; }
+.asiento { display: flex; align-items: center; gap: 8px; background: var(--sup); border: 1px solid var(--borde);
+  border-left: 6px solid var(--c); border-radius: 12px; padding: 6px 8px; }
+.asiento img { width: 34px; height: 34px; flex: none; }
+.asiento input { flex: 1; min-width: 0; background: var(--sup2); border: 1px solid var(--borde); color: var(--texto);
+  border-radius: 8px; padding: 8px 10px; font-size: 16px; font-weight: 700; }
+.asiento input:disabled { opacity: .7; }
+.asiento .tipo { background: var(--sup2); border: 1px solid var(--borde); border-radius: 10px; padding: 8px 10px;
+  font-size: 13px; font-weight: 800; min-width: 92px; }
+.asiento .tipo.maq { color: var(--apoyo); }
+.aviso18 { text-align: center; color: var(--apoyo); font-size: 12px; margin: 0; }
+.salir-capa { position: absolute; top: calc(env(safe-area-inset-top) + 10px); left: 16px; }
+.lista-final { margin: 0; padding: 0; list-style: none; }
+.lista-final li { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-weight: 700; }
+.lista-final li .punto { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.lista-final li b { margin-left: auto; color: var(--ambar); font-size: 18px; }
+</style>
+</head>
+<body>
+<div class="barra">
+  <button class="mini" id="salir">‹ Salir</button>
+  <div class="titulo">Arrima la chapa</div>
+  <div class="meta" id="meta">a 5</div>
+</div>
+<div class="marcador" id="marcador"></div>
+<div class="bocadillo"><img id="b-fig" alt=""><div class="texto"><span class="quien">Chapas, el que arbitra</span><span id="b-texto">…</span></div></div>
+<div class="escena"><canvas id="lienzo"></canvas></div>
+<div class="pie" id="pie">&nbsp;</div>
+
+<div class="capa ver" id="portada">
+  <button class="mini salir-capa">‹ Salir</button>
+  <div class="figs"><img data-fig="chapas" alt=""></div>
+  <h1>Arrima la chapa</h1>
+  <p class="sub">La petanca de la Plaza Posavasos</p>
+  <div class="tarjeta">
+    <p><b>Arrastra hacia atrás y suelta</b>: tu chapa sale hacia arriba. Déjala <b>lo más cerca del guisante</b>.</p>
+    <p>Puedes sacar a golpes la del rival. Lo que se cae de la mesa, se lo queda Chapas.</p>
+  </div>
+  <div class="opcion">Jugadores <div class="selector" data-op="jugadores"><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button></div></div>
+  <div class="asientos" id="asientos"></div>
+  <div class="opcion">Puntos para ganar <div class="selector" data-op="puntosParaGanar"><button data-v="3">3</button><button data-v="5">5</button><button data-v="7">7</button></div></div>
+  <div class="opcion" id="fila-nivel">Vecinos de la máquina <div class="selector" data-op="nivel"><button data-v="tranquilo">Tranquilos</button><button data-v="normal">Normal</button><button data-v="listo">Finos</button></div></div>
+  <button class="btn" id="b-jugar">¡A jugar!</button>
+  <p class="aviso18">+18 · Bebe con cabeza. Aquí nadie bebe: se juega.<br><span id="p-premio"></span></p>
+</div>
+
+<div class="capa" id="final">
+  <button class="mini salir-capa">‹ Salir</button>
+  <div class="figs"><img id="f-fig" alt=""></div>
+  <h1 id="f-titulo">¡Gana!</h1>
+  <div class="tarjeta"><ul class="lista-final" id="f-lista"></ul></div>
+  <div class="tarjeta"><p id="f-texto"></p></div>
+  <button class="btn" id="b-otra">Otra</button>
+  <button class="btn sec" id="b-menu">Cambiar jugadores</button>
+</div>
+
+<script>
+// ===== La app (components/JuegoEnWeb.js): le pasa DATOS = { figuras } y escucha { tipo: 'chapas' | 'vibrar' | 'salir' } =====
+var DATOS = {"figuras":{"jarron":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M44 33h4a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4h-4\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"8\" stroke-linecap=\"round\"/><path d=\"M44 33h4a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4h-4\" fill=\"none\" stroke=\"#E9A52C\" stroke-width=\"4\" stroke-linecap=\"round\"/><path d=\"M16 25h28v25a5 5 0 0 1-5 5H21a5 5 0 0 1-5-5z\" fill=\"#E9A52C\"/><path d=\"M16 25h28v25a5 5 0 0 1-5 5H21a5 5 0 0 1-5-5z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M22 34v14M30 34v14M38 34v14\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.45\"/><path d=\"M13 25a5 5 0 0 1 4-7a6 6 0 0 1 11-3a6 6 0 0 1 11 1a5 5 0 0 1 6 6a3 3 0 0 1-2 6H16a3 3 0 0 1-3-3z\" fill=\"#FFF9EE\"/><path d=\"M13 25a5 5 0 0 1 4-7a6 6 0 0 1 11-3a6 6 0 0 1 11 1a5 5 0 0 1 6 6a3 3 0 0 1-2 6H16a3 3 0 0 1-3-3z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M17 17c4-6 16-7 22-2c-6 1-14 2-22 2z\" fill=\"#8A1F1F\"/><path d=\"M17 17c4-6 16-7 22-2c-6 1-14 2-22 2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"23\" cy=\"15\" r=\"2\" fill=\"#F2C230\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"25\" cy=\"36\" r=\"3.2\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"25.6\" cy=\"36.4\" r=\"1.4400000000000002\" fill=\"#2A1D12\"/><circle cx=\"35\" cy=\"36\" r=\"3.2\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"35.6\" cy=\"36.4\" r=\"1.4400000000000002\" fill=\"#2A1D12\"/><path d=\"M25 45q5 4 10 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","kevin":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M17.5 13.5h29v38h-29z\" fill=\"#8E96A1\"/><path d=\"M17.5 13.5h29v38h-29z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M22 17.5V47.5\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.5\"/><path d=\"M25.2 19V46\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"0.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.4\"/><path d=\"M42.6 16V49\" fill=\"none\" stroke=\"#5F6772\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.35\"/><path d=\"M35.5 45.5q3.2-2.6 6.4 0q-3.2 2.2-6.4 0z\" fill=\"#5F6772\" opacity=\".8\"/><path d=\"M36 46.7q2.7 1.9 5.4 0\" fill=\"none\" stroke=\"#C9CFD6\" stroke-width=\"0.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M17.5 51.5h29l-2.4 4.5h-24.2z\" fill=\"#C9CFD6\"/><path d=\"M17.5 51.5h29l-2.4 4.5h-24.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M17.5 13.5h29l-2.4-3h-24.2z\" fill=\"#B3BAC3\"/><path d=\"M17.5 13.5h29l-2.4-3h-24.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><ellipse cx=\"32\" cy=\"10.4\" rx=\"12\" ry=\"2.6\" fill=\"#DFE4E9\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><path d=\"M28.6 10.4q-2.6-1.4-5.2 0q2.6 1.2 5.2 0z\" fill=\"#5F6772\"/><rect x=\"30.4\" y=\"9.1\" width=\"8.4\" height=\"2.6\" rx=\"1.3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\".9\"/><path d=\"M17 17.6q15-3 30 0v4.6q-15-3-30 0z\" fill=\"#D9534F\"/><path d=\"M17 17.6q15-3 30 0v4.6q-15-3-30 0z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M45.8 18.4l6-3.2-.8 7.2z\" fill=\"#D9534F\"/><path d=\"M45.8 18.4l6-3.2-.8 7.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"27\" cy=\"29\" r=\"3.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"27.6\" cy=\"29.4\" r=\"1.71\" fill=\"#2A1D12\"/><circle cx=\"37\" cy=\"29\" r=\"3.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"37.6\" cy=\"29.4\" r=\"1.71\" fill=\"#2A1D12\"/><path d=\"M27.5 37.5q4.5 4 9 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","cero":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M28.8 8h6.4v9c8.8 2 8.8 6 8.8 10V53a3 3 0 0 1-3 3h-18a3 3 0 0 1-3-3V27c0-4 0-8 8.8-10z\" fill=\"#2F6B3A\"/><path d=\"M28.8 8h6.4v9c8.8 2 8.8 6 8.8 10V53a3 3 0 0 1-3 3h-18a3 3 0 0 1-3-3V27c0-4 0-8 8.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M28.5 5h7v3.5h-7z\" fill=\"#4F7BD9\"/><path d=\"M28.5 5h7v3.5h-7z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M29 12h6v3h-6z\" fill=\"#FFFFFF\"/><path d=\"M29 12h6v3h-6z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M32 12.5v2M31 13.5h2\" fill=\"none\" stroke=\"#D9534F\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M23 38h18v11h-18z\" fill=\"#DCECFF\"/><path d=\"M23 38h18v11h-18z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><text x=\"32\" y=\"47\" text-anchor=\"middle\" font-family=\"Arial Black,Arial\" font-weight=\"900\" font-size=\"7\" fill=\"#2F5FA1\">0,0</text><circle cx=\"28\" cy=\"29\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.6\" cy=\"29.4\" r=\"1.1700000000000002\" fill=\"#2A1D12\"/><path d=\"M24.9 25.9h6.2v3.2h-6.2z\" fill=\"#2F6B3A\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"36\" cy=\"29\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.6\" cy=\"29.4\" r=\"1.1700000000000002\" fill=\"#2A1D12\"/><path d=\"M32.9 25.9h6.2v3.2h-6.2z\" fill=\"#2F6B3A\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><path d=\"M29 34q3 1.5 6 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","quinto":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M28.8 18h6.4v6c6.8 2 6.8 6 6.8 10V53a3 3 0 0 1-3 3h-14a3 3 0 0 1-3-3V34c0-4 0-8 6.8-10z\" fill=\"#A8652A\"/><path d=\"M28.8 18h6.4v6c6.8 2 6.8 6 6.8 10V53a3 3 0 0 1-3 3h-14a3 3 0 0 1-3-3V34c0-4 0-8 6.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M28.5 15h7v3.5h-7z\" fill=\"#D9534F\"/><path d=\"M28.5 15h7v3.5h-7z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M17 17q15-14 30 0q-15-4-30 0z\" fill=\"#1D1D2A\"/><path d=\"M17 17q15-14 30 0q-15-4-30 0z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M19 16q13-3 26 0\" fill=\"none\" stroke=\"#F2C230\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"32\" cy=\"11\" r=\"1.8\" fill=\"#D9534F\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M25 44h14v7h-14z\" fill=\"#FFF9EE\"/><path d=\"M25 44h14v7h-14z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><text x=\"32\" y=\"49.5\" text-anchor=\"middle\" font-family=\"Arial Black,Arial\" font-weight=\"900\" font-size=\"5\" fill=\"#2A1D12\">20cl</text><circle cx=\"28.5\" cy=\"34\" r=\"2.4\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"29.1\" cy=\"34.4\" r=\"1.08\" fill=\"#2A1D12\"/><path d=\"M25.6 32.300000000000004h5.8v1.8h-5.8z\" fill=\"#A8652A\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"35.5\" cy=\"34\" r=\"2.4\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.1\" cy=\"34.4\" r=\"1.08\" fill=\"#2A1D12\"/><path d=\"M32.6 29.900000000000002h5.8v4.2h-5.8z\" fill=\"#A8652A\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><path d=\"M28 39q3 1 7-1.5\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","abadia":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M28.8 10h6.4v9c9.8 2 9.8 6 9.8 10V53a3 3 0 0 1-3 3h-20a3 3 0 0 1-3-3V29c0-4 0-8 9.8-10z\" fill=\"#3A1F10\"/><path d=\"M28.8 10h6.4v9c9.8 2 9.8 6 9.8 10V53a3 3 0 0 1-3 3h-20a3 3 0 0 1-3-3V29c0-4 0-8 9.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M18 40c0-24 6-30 14-30s14 6 14 30h-5c0-10-4-16-9-16s-9 6-9 16z\" fill=\"#1D1D24\"/><path d=\"M18 40c0-24 6-30 14-30s14 6 14 30h-5c0-10-4-16-9-16s-9 6-9 16z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M23 27q9-5 18 0\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M32 42v8M29 45h6\" fill=\"none\" stroke=\"#F2C230\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"28\" cy=\"31\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.6\" cy=\"31.4\" r=\"1.1700000000000002\" fill=\"#2A1D12\"/><path d=\"M24.9 27.9h6.2v3.2h-6.2z\" fill=\"#3A1F10\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"36\" cy=\"31\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.6\" cy=\"31.4\" r=\"1.1700000000000002\" fill=\"#2A1D12\"/><path d=\"M32.9 27.9h6.2v3.2h-6.2z\" fill=\"#3A1F10\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><path d=\"M29 36h6\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","congelada":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M28.8 8h6.4v9c8.8 2 8.8 6 8.8 10V53a3 3 0 0 1-3 3h-18a3 3 0 0 1-3-3V27c0-4 0-8 8.8-10z\" fill=\"#8CC9EA\"/><path d=\"M28.8 8h6.4v9c8.8 2 8.8 6 8.8 10V53a3 3 0 0 1-3 3h-18a3 3 0 0 1-3-3V27c0-4 0-8 8.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M28.5 5h7v3.5h-7z\" fill=\"#D6EEF9\"/><path d=\"M28.5 5h7v3.5h-7z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"24\" cy=\"22\" r=\"2\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"39\" cy=\"46\" r=\"1.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M20 37q12 5 24 0v4q-12 5-24 0z\" fill=\"#D9534F\"/><path d=\"M20 37q12 5 24 0v4q-12 5-24 0z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M38 40l3 10h-5z\" fill=\"#D9534F\"/><path d=\"M38 40l3 10h-5z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M22 50l2 3 2-3 2 3 2-3 2 3 2-3 2 3 2-3\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"28\" cy=\"28\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.6\" cy=\"28.4\" r=\"0.9099999999999999\" fill=\"#2A1D12\"/><circle cx=\"36\" cy=\"28\" r=\"3.5100000000000002\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.6\" cy=\"28.4\" r=\"1.2285\" fill=\"#2A1D12\"/><path d=\"M28 33q4 3 8 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","barril":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M17 16q-4 20 0 38h30q4-18 0-38z\" fill=\"#A8652A\"/><path d=\"M17 16q-4 20 0 38h30q4-18 0-38z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M26 16q-2 19 0 38M38 16q2 19 0 38\" fill=\"none\" stroke=\"#6E4220\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M15 22q17 3 34 0M15 47q17 3 34 0\" fill=\"none\" stroke=\"#8E96A1\" stroke-width=\"3.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><ellipse cx=\"32\" cy=\"16\" rx=\"15\" ry=\"3.5\" fill=\"#B87A40\" stroke=\"#2A1D12\" stroke-width=\"1.6\"/><circle cx=\"26\" cy=\"29\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"26.6\" cy=\"29.4\" r=\"1.35\" fill=\"#2A1D12\"/><circle cx=\"38\" cy=\"29\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"38.6\" cy=\"29.4\" r=\"1.35\" fill=\"#2A1D12\"/><path d=\"M30 32h4v5h-4z\" fill=\"#8E96A1\"/><path d=\"M30 32h4v5h-4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M24 40q4-3 8-1q4-2 8 1q-4 2-8 1q-4 1-8-1z\" fill=\"#2A1D12\"/><path d=\"M24 40q4-3 8-1q4-2 8 1q-4 2-8 1q-4 1-8-1z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/></svg>","chapas":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M28.8 12h6.4v9c7.8 2 7.8 6 7.8 10V53a3 3 0 0 1-3 3h-16a3 3 0 0 1-3-3V31c0-4 0-8 7.8-10z\" fill=\"#3D2208\"/><path d=\"M28.8 12h6.4v9c7.8 2 7.8 6 7.8 10V53a3 3 0 0 1-3 3h-16a3 3 0 0 1-3-3V31c0-4 0-8 7.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M28.5 9h7v3.5h-7z\" fill=\"#8E96A1\"/><path d=\"M28.5 9h7v3.5h-7z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M21 34l22 16\" fill=\"none\" stroke=\"#7A4A24\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"23\" cy=\"36\" r=\"2.2\" fill=\"#F2C230\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"29\" cy=\"40.3\" r=\"2.2\" fill=\"#F2C230\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"35\" cy=\"44.6\" r=\"2.2\" fill=\"#F2C230\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"41\" cy=\"48.9\" r=\"2.2\" fill=\"#F2C230\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"28\" cy=\"29\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.6\" cy=\"29.4\" r=\"1.26\" fill=\"#2A1D12\"/><circle cx=\"36\" cy=\"29\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.6\" cy=\"29.4\" r=\"1.26\" fill=\"#2A1D12\"/><path d=\"M30 34h4\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","yonkilata":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M7 13l5 3M5 25h6\" fill=\"none\" stroke=\"#E9C86A\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.35\"/><path d=\"M8 63a4 4 0 0 1 3-5a5 5 0 0 1 7-3a6 6 0 0 1 10-2a6 6 0 0 1 11-1a5 5 0 0 1 9 1a5 5 0 0 1 7 4a3 3 0 0 1 1 6z\" fill=\"#FFF8E6\"/><path d=\"M8 63a4 4 0 0 1 3-5a5 5 0 0 1 7-3a6 6 0 0 1 10-2a6 6 0 0 1 11-1a5 5 0 0 1 9 1a5 5 0 0 1 7 4a3 3 0 0 1 1 6z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><g transform=\"translate(2 -2.6) rotate(-16 33 6)\"><path d=\"M24 6a6 3 0 0 1 6-3h8a3.4 3 0 0 1 0 6h-8a6 3 0 0 1-6-3z\" fill=\"#B8861B\" stroke=\"#2A1D12\" stroke-width=\"1.6\"/><ellipse cx=\"30.5\" cy=\"6\" rx=\"3.6\" ry=\"1.3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"38.6\" cy=\"6\" r=\"1\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1\"/></g><path d=\"M44 36q7-3 9-13\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"8.5\" stroke-linecap=\"round\"/><path d=\"M44 36q7-3 9-13\" fill=\"none\" stroke=\"#8A7F6A\" stroke-width=\"4.5\" stroke-linecap=\"round\"/><circle cx=\"53.5\" cy=\"21\" r=\"3\" fill=\"#4A4A52\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M51.8 18.6v-1.8M53.6 18.2v-2M55.4 18.6v-1.8\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M51.8 18.6v-1.8M53.6 18.2v-2M55.4 18.6v-1.8\" fill=\"none\" stroke=\"#C3C9CF\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><g transform=\"rotate(-7 32 36)\"><path d=\"M22 14.5h20l2.5 4.5h-25z\" fill=\"#C3C9CF\"/><path d=\"M22 14.5h20l2.5 4.5h-25z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><ellipse cx=\"32\" cy=\"14.5\" rx=\"10\" ry=\"2\" fill=\"#C3C9CF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M19.5 19h25v3.5q-1.8 2.2 0 4.6V52h-25V36.2q1.2-1.6 0-3.2z\" fill=\"#B3261E\"/><path d=\"M19.5 19h25v3.5q-1.8 2.2 0 4.6V52h-25V36.2q1.2-1.6 0-3.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M42.5 23.5l-2 2.5\" fill=\"none\" stroke=\"#7A1712\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M19.5 52h25l-1.5 3h-22z\" fill=\"#C3C9CF\"/><path d=\"M19.5 52h25l-1.5 3h-22z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M17 17.5q-1.5-9 7-10.5q7-1 9.5 5.5q-8-.5-16.5 5z\" fill=\"#4A4A52\"/><path d=\"M17 17.5q-1.5-9 7-10.5q7-1 9.5 5.5q-8-.5-16.5 5z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M17.4 16.4q7-5 15.6-4.4\" fill=\"none\" stroke=\"#6A6A74\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M21 10.5l1 3.5M24.5 9l.6 3.6M28 8.8l.3 3.4\" fill=\"none\" stroke=\"#33333A\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M28 21q4-1 8 0\" fill=\"none\" stroke=\"#7A1712\" stroke-width=\"0.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"27.5\" cy=\"25\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.1\" cy=\"25.4\" r=\"1.26\" fill=\"#2A1D12\"/><path d=\"M24.2 21.7h6.6v3.4h-6.6z\" fill=\"#B3261E\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"36.5\" cy=\"25\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"37.1\" cy=\"25.4\" r=\"1.26\" fill=\"#2A1D12\"/><path d=\"M33.2 21.7h6.6v3.4h-6.6z\" fill=\"#B3261E\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><path d=\"M24.6 28.2q2.9 1.5 5.8 0M33.6 28.2q2.9 1.5 5.8 0\" fill=\"none\" stroke=\"#7E5A8C\" stroke-width=\"1.3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M27.5 30.2q5 1.4 9.5-1.4q-3.5 4.6-9.5 1.4z\" fill=\"#3A1F14\"/><path d=\"M27.5 30.2q5 1.4 9.5-1.4q-3.5 4.6-9.5 1.4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M29 30.6h3v1.3h-3zM33.6 30.3h2.2v1.3h-2.2z\" fill=\"#FFFFFF\"/><g fill=\"#4A0F0B\" opacity=\".7\"><circle cx=\"26\" cy=\"31.5\" r=\".45\"/><circle cx=\"27.6\" cy=\"33\" r=\".45\"/><circle cx=\"30\" cy=\"33.6\" r=\".45\"/><circle cx=\"32.6\" cy=\"33.6\" r=\".45\"/><circle cx=\"35.2\" cy=\"33.2\" r=\".45\"/><circle cx=\"37.6\" cy=\"31.8\" r=\".45\"/></g><path d=\"M19.5 39h25v8h-25z\" fill=\"#3A1F14\"/><path d=\"M19.5 39h25v8h-25z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M19.5 40.4h25M19.5 45.6h25\" fill=\"none\" stroke=\"#B8861B\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><text x=\"32\" y=\"44.7\" text-anchor=\"middle\" font-family=\"Arial Black,Arial\" font-weight=\"900\" font-size=\"4.4\" fill=\"#B8861B\">0,5 L</text><path d=\"M21 31l-6 3.5-1 22 2-1.4 2 1.6 2-1.6 2 1.6 2.4-1.8-.4-18.4q-.5-2.5-2-3.5z\" fill=\"#8A7F6A\"/><path d=\"M21 31l-6 3.5-1 22 2-1.4 2 1.6 2-1.6 2 1.6 2.4-1.8-.4-18.4q-.5-2.5-2-3.5z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M43 31l6 3.5 1 22-2-1.4-2 1.6-2-1.6-2 1.6-2.4-1.8.4-18.4q.5-2.5 2-3.5z\" fill=\"#8A7F6A\"/><path d=\"M43 31l6 3.5 1 22-2-1.4-2 1.6-2-1.6-2 1.6-2.4-1.8.4-18.4q.5-2.5 2-3.5z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M21 31l3 6-3.5 1z\" fill=\"#A39880\"/><path d=\"M21 31l3 6-3.5 1z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M43 31l-3 6 3.5 1z\" fill=\"#A39880\"/><path d=\"M43 31l-3 6 3.5 1z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M45.6 50.4h3v3h-3z\" fill=\"#6F8A8C\"/><path d=\"M45.6 50.4h3v3h-3z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M18 33.2q14 4 28 0v4.6q-14 4-28 0z\" fill=\"#6B7A4E\"/><path d=\"M18 33.2q14 4 28 0v4.6q-14 4-28 0z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M19 37l-1.5 13h4.5l1-13z\" fill=\"#6B7A4E\"/><path d=\"M19 37l-1.5 13h4.5l1-13z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M41.5 37l1 12h4.5l-1.5-12z\" fill=\"#6B7A4E\"/><path d=\"M41.5 37l1 12h4.5l-1.5-12z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M18.4 44h4.2M43 43.5h4.2\" fill=\"none\" stroke=\"#97A070\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></g><path d=\"M18 37q-6 2-5 8\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"8\" stroke-linecap=\"round\"/><path d=\"M18 37q-6 2-5 8\" fill=\"none\" stroke=\"#8A7F6A\" stroke-width=\"4\" stroke-linecap=\"round\"/><circle cx=\"13.6\" cy=\"46\" r=\"2.6\" fill=\"#4A4A52\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/></svg>","san":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M6 64Q6 47 21 43H43Q58 47 58 64Z\" fill=\"#383846\"/><path d=\"M6 64Q6 47 21 43H43Q58 47 58 64Z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M7.6 63Q7.6 48.4 21.4 44.6H42.6Q56.4 48.4 56.4 63\" fill=\"none\" stroke=\"#8A8A9A\" stroke-width=\"1.1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.9\"/><path d=\"M26 43L32 55L38 43Z\" fill=\"#FFFFFF\"/><path d=\"M26 43L32 55L38 43Z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M30.6 46h2.8l1 9-2.4 2.6-2.4-2.6z\" fill=\"#383846\"/><path d=\"M30.6 46h2.8l1 9-2.4 2.6-2.4-2.6z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M21 43l7 13M43 43l-7 13\" fill=\"none\" stroke=\"#4A4A58\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"47\" cy=\"51\" r=\"2.6\" fill=\"#7BBF4A\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M46 50l1-1\" fill=\"none\" stroke=\"#C8E8A8\" stroke-width=\"0.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M27 37h10v7h-10z\" fill=\"#F2C9A0\"/><path d=\"M27 37h10v7h-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><ellipse cx=\"32\" cy=\"25\" rx=\"13\" ry=\"14\" fill=\"#F2C9A0\" stroke=\"#2A1D12\" stroke-width=\"2\"/><path d=\"M19 25Q18 42 32 42Q46 42 45 25Q43 33 38 34Q32 36 26 34Q21 33 19 25Z\" fill=\"#4A3628\"/><path d=\"M19 25Q18 42 32 42Q46 42 45 25Q43 33 38 34Q32 36 26 34Q21 33 19 25Z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M19.5 24Q15 7 30 7Q41 3 46.5 12.5Q48 20 44.5 22Q41.5 14.5 33 15.5Q24 14.5 19.5 24Z\" fill=\"#4A3628\"/><path d=\"M19.5 24Q15 7 30 7Q41 3 46.5 12.5Q48 20 44.5 22Q41.5 14.5 33 15.5Q24 14.5 19.5 24Z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M22.5 19.5q3.2-2.2 6.4-0.6M35.1 18.9q3.2-1.6 6.4 0.6\" fill=\"none\" stroke=\"#4A3628\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"23\" cy=\"29.5\" r=\"2.4\" fill=\"#FF8F8F\" opacity=\".7\"/><circle cx=\"41\" cy=\"29.5\" r=\"2.4\" fill=\"#FF8F8F\" opacity=\".7\"/><path d=\"M24.2 24.6q2.3-2.4 4.6 0M35.2 24.6q2.3-2.4 4.6 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M21.5 24.5a4.5 3.8 0 1 0 9 0a4.5 3.8 0 1 0-9 0M33.5 24.5a4.5 3.8 0 1 0 9 0a4.5 3.8 0 1 0-9 0M30.5 24q1.5-1 3 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M26.5 31Q32 38.5 37.5 31Z\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\" stroke-linejoin=\"round\"/><path d=\"M30 31.6v2.6M34 31.6v2.6\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"9\" cy=\"34\" r=\"2.8\" fill=\"#7BBF4A\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"55\" cy=\"30\" r=\"2.4\" fill=\"#7BBF4A\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M10 23.7l0.7 1.6 1.6 0.7l-1.6 0.7l-0.7 1.6l-0.7 -1.6l-1.6 -0.7l1.6 -0.7z\" fill=\"#F2C230\"/></svg>","chunda":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M9 13l2.4 2.4M7 20h3M55 13l-2.4 2.4M57 20h-3\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.3\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M32 17q-3-8-12-8\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"6.4\" stroke-linecap=\"round\"/><path d=\"M32 17q-3-8-12-8\" fill=\"none\" stroke=\"#5FD3DC\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><path d=\"M32 17q3-8 12-8\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"6.4\" stroke-linecap=\"round\"/><path d=\"M32 17q3-8 12-8\" fill=\"none\" stroke=\"#F2C230\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><path d=\"M32 17q-1-10-6-13\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"6.4\" stroke-linecap=\"round\"/><path d=\"M32 17q-1-10-6-13\" fill=\"none\" stroke=\"#9BE22D\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><path d=\"M32 17q1-10 6-13\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"6.4\" stroke-linecap=\"round\"/><path d=\"M32 17q1-10 6-13\" fill=\"none\" stroke=\"#FF8AC4\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><path d=\"M29.2 15.4h5.6v3h-5.6z\" fill=\"#9BE22D\"/><path d=\"M29.2 15.4h5.6v3h-5.6z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M21 38q-7-4-9-16\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M21 38q-7-4-9-16\" fill=\"none\" stroke=\"#C8457A\" stroke-width=\"3\" stroke-linecap=\"round\"/><path d=\"M43 38q7-4 9-16\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M43 38q7-4 9-16\" fill=\"none\" stroke=\"#C8457A\" stroke-width=\"3\" stroke-linecap=\"round\"/><path d=\"M10.4 27.6l3.6-1.4M53.6 27.6l-3.6-1.4\" fill=\"none\" stroke=\"#9BE22D\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"11.6\" cy=\"20.6\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"52.4\" cy=\"20.6\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M28.8 21h6.4v4c8.8 2 8.8 6 8.8 10V53a3 3 0 0 1-3 3h-18a3 3 0 0 1-3-3V35c0-4 0-8 8.8-10z\" fill=\"#C8457A\"/><path d=\"M28.8 21h6.4v4c8.8 2 8.8 6 8.8 10V53a3 3 0 0 1-3 3h-18a3 3 0 0 1-3-3V35c0-4 0-8 8.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M28 18h8v3l-1 1.4-1-1.4-1 1.4-1-1.4-1 1.4-1-1.4-1 1.4-1-1.4z\" fill=\"#5FD3DC\"/><path d=\"M28 18h8v3l-1 1.4-1-1.4-1 1.4-1-1.4-1 1.4-1-1.4-1 1.4-1-1.4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M25.6 38.4q2.4-2.6 4.8 0M33.6 38.4q2.4-2.6 4.8 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"24.4\" cy=\"41.6\" r=\"1.8\" fill=\"#FF8AC4\" opacity=\".75\"/><circle cx=\"39.6\" cy=\"41.6\" r=\"1.8\" fill=\"#FF8AC4\" opacity=\".75\"/><path d=\"M28.6 41.4q3.4 4.6 6.8 0z\" fill=\"#7A1F3D\" stroke=\"#2A1D12\" stroke-width=\"1.3\" stroke-linejoin=\"round\"/><path d=\"M23.5 46h17v7.6h-17z\" fill=\"#FFFFFF\"/><path d=\"M23.5 46h17v7.6h-17z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M26 52.4v-3M29 52.4v-5M32 52.4v-2.2M35 52.4v-4.2M38 52.4v-2.8\" stroke=\"#C8457A\" stroke-width=\"1.8\" stroke-linecap=\"round\"/></svg>","coloso":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><g transform=\"rotate(-24 12 40)\"><path d=\"M8.4 28h7.2v24h-7.2z\" fill=\"#EFEADB\"/><path d=\"M8.4 28h7.2v24h-7.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M10 32h4M10 35h4M10 38h3\" fill=\"none\" stroke=\"#8A8576\" stroke-width=\"0.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></g><path d=\"M18 38q-4 3-5 8\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7.4\" stroke-linecap=\"round\"/><path d=\"M18 38q-4 3-5 8\" fill=\"none\" stroke=\"#2B2E36\" stroke-width=\"3.4\" stroke-linecap=\"round\"/><circle cx=\"13\" cy=\"46.6\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M46 36q6-3 8-15\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7.4\" stroke-linecap=\"round\"/><path d=\"M46 36q6-3 8-15\" fill=\"none\" stroke=\"#2B2E36\" stroke-width=\"3.4\" stroke-linecap=\"round\"/><path d=\"M54.2 18.4V11.6\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"4.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M54.2 18.4V11.6\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"54.2\" cy=\"19.8\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M28.8 5h6.4v4c11.8 2 11.8 6 11.8 10V53a3 3 0 0 1-3 3h-24a3 3 0 0 1-3-3V19c0-4 0-8 11.8-10z\" fill=\"#2B2E36\"/><path d=\"M28.8 5h6.4v4c11.8 2 11.8 6 11.8 10V53a3 3 0 0 1-3 3h-24a3 3 0 0 1-3-3V19c0-4 0-8 11.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M21.6 25v26\" fill=\"none\" stroke=\"#7C8494\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.8\"/><path d=\"M44.2 22v31\" fill=\"none\" stroke=\"#5A6170\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.8\"/><path d=\"M28 2h8v3.4h-8z\" fill=\"#B39A4A\"/><path d=\"M28 2h8v3.4h-8z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M27.6 9.6h8.8v3.6h-8.8z\" fill=\"#D9B44A\"/><path d=\"M27.6 9.6h8.8v3.6h-8.8z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"27\" cy=\"25.6\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"27.6\" cy=\"26\" r=\"1.35\" fill=\"#2A1D12\"/><path d=\"M23.5 22.1h7v3.6h-7z\" fill=\"#4A4F5C\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"37\" cy=\"25.6\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"37.6\" cy=\"26\" r=\"1.35\" fill=\"#2A1D12\"/><path d=\"M33.5 22.1h7v3.6h-7z\" fill=\"#4A4F5C\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><path d=\"M23.6 20.6l6-.6M34.4 19.2l6 .4\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M29 31.6q3 1.8 6-.8\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M22 36h20v14h-20z\" fill=\"#D9B44A\"/><path d=\"M22 36h20v14h-20z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><text x=\"32\" y=\"46.6\" text-anchor=\"middle\" font-family=\"Arial Black,Arial\" font-weight=\"900\" font-size=\"8\" fill=\"#2A1D12\">60 L</text></svg>","filtrado":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M42 42q6 0 8-5\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M42 42q6 0 8-5\" fill=\"none\" stroke=\"#EEF4F5\" stroke-width=\"3\" stroke-linecap=\"round\"/><path d=\"M47 33h9v9h-9z\" fill=\"#9FD4F0\"/><path d=\"M47 33h9v9h-9z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M48 33q4-5 8 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"5.6\" stroke-linecap=\"round\"/><path d=\"M48 33q4-5 8 0\" fill=\"none\" stroke=\"#9FD4F0\" stroke-width=\"1.6\" stroke-linecap=\"round\"/><path d=\"M22 42q-6 1-7 7\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M22 42q-6 1-7 7\" fill=\"none\" stroke=\"#EEF4F5\" stroke-width=\"3\" stroke-linecap=\"round\"/><circle cx=\"15\" cy=\"49.6\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M28.8 6h6.4v9c7.8 2 7.8 6 7.8 10V53a3 3 0 0 1-3 3h-16a3 3 0 0 1-3-3V25c0-4 0-8 7.8-10z\" fill=\"#EEF4F5\"/><path d=\"M28.8 6h6.4v9c7.8 2 7.8 6 7.8 10V53a3 3 0 0 1-3 3h-16a3 3 0 0 1-3-3V25c0-4 0-8 7.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M23 30h18v22.4a2.6 2.6 0 0 1-2.6 2.6H25.6a2.6 2.6 0 0 1-2.6-2.6z\" fill=\"#F4D670\" opacity=\".85\"/><path d=\"M23 30h18\" fill=\"none\" stroke=\"#E2B84A\" stroke-width=\"1.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M28.5 3h7v3.5h-7z\" fill=\"#FFFFFF\"/><path d=\"M28.5 3h7v3.5h-7z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><g fill=\"#2F7FBF\"><circle cx=\"40.4\" cy=\"14.6\" r=\"1\"/><circle cx=\"38\" cy=\"11.6\" r=\".9\"/><circle cx=\"41.6\" cy=\"11\" r=\".8\"/></g><path d=\"M32 25l-5-2.6v5.2z\" fill=\"#24345E\"/><path d=\"M32 25l-5-2.6v5.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M32 25l5-2.6v5.2z\" fill=\"#24345E\"/><path d=\"M32 25l5-2.6v5.2z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"32\" cy=\"25\" r=\"1.4\" fill=\"#24345E\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><g fill=\"#FFFFFF\"><circle cx=\"28.6\" cy=\"24.4\" r=\".6\"/><circle cx=\"35.4\" cy=\"24.4\" r=\".6\"/></g><circle cx=\"28\" cy=\"33.6\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.6\" cy=\"34\" r=\"1.1700000000000002\" fill=\"#2A1D12\"/><circle cx=\"36\" cy=\"33.6\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.6\" cy=\"34\" r=\"1.1700000000000002\" fill=\"#2A1D12\"/><path d=\"M25.4 30.2q2.4-1 4.6-.2M34 30q2.2-.8 4.6.2\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M28.8 38.4q1.6-1 3.2 0q1.6-1 3.2 0\" fill=\"none\" stroke=\"#3A2A1A\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M30.4 40.6h3.2\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M25 44h14v7h-14z\" fill=\"#FBF6E6\"/><path d=\"M25 44h14v7h-14z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M27.4 47.6h9.2\" fill=\"none\" stroke=\"#24345E\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M49 34L44.6 19.6\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"6.4\" stroke-linecap=\"round\"/><path d=\"M49 34L44.6 19.6\" fill=\"none\" stroke=\"#2F7FBF\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><ellipse cx=\"44\" cy=\"17.8\" rx=\"2.8\" ry=\"1.7\" transform=\"rotate(-72 44 17.8)\" fill=\"#2F7FBF\" stroke=\"#2A1D12\" stroke-width=\"1.3\"/></svg>","turbio":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M7 22l4-5-1 4 3-1-4 6 1-4z\" fill=\"#F2C230\"/><path d=\"M7 22l4-5-1 4 3-1-4 6 1-4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M54 40l4-5-1 4 3-1-4 6 1-4z\" fill=\"#F2C230\"/><path d=\"M54 40l4-5-1 4 3-1-4 6 1-4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M47 6l3-4-.6 3 2.4-.8-3 4.6.6-3z\" fill=\"#F2C230\"/><path d=\"M47 6l3-4-.6 3 2.4-.8-3 4.6.6-3z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M22 38q-7-3-8-14\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M22 38q-7-3-8-14\" fill=\"none\" stroke=\"#EEF4F5\" stroke-width=\"3\" stroke-linecap=\"round\"/><circle cx=\"14\" cy=\"22.6\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M42 38q7-4 10-13\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M42 38q7-4 10-13\" fill=\"none\" stroke=\"#EEF4F5\" stroke-width=\"3\" stroke-linecap=\"round\"/><g transform=\"rotate(14 53 17)\"><path d=\"M47 11h12l-6 15z\" fill=\"#E9B865\"/><path d=\"M47 11h12l-6 15z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M47 11h12v2.6h-12z\" fill=\"#C98E3A\"/><path d=\"M47 11h12v2.6h-12z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"51.4\" cy=\"16\" r=\"1.4\" fill=\"#D9534F\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"55\" cy=\"15.6\" r=\"1.2\" fill=\"#D9534F\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"53.2\" cy=\"20\" r=\"1.1\" fill=\"#D9534F\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/></g><circle cx=\"52.4\" cy=\"24.4\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M28.8 6h6.4v9c7.8 2 7.8 6 7.8 10V53a3 3 0 0 1-3 3h-16a3 3 0 0 1-3-3V25c0-4 0-8 7.8-10z\" fill=\"#EEF4F5\"/><path d=\"M28.8 6h6.4v9c7.8 2 7.8 6 7.8 10V53a3 3 0 0 1-3 3h-16a3 3 0 0 1-3-3V25c0-4 0-8 7.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M23 26.5h18v25.9a2.6 2.6 0 0 1-2.6 2.6H25.6a2.6 2.6 0 0 1-2.6-2.6z\" fill=\"#A65A1E\" opacity=\".9\"/><g fill=\"#6B4A22\"><circle cx=\"26\" cy=\"52\" r=\"1\"/><circle cx=\"29.6\" cy=\"53\" r=\".9\"/><circle cx=\"34\" cy=\"52.4\" r=\"1.1\"/><circle cx=\"38\" cy=\"53\" r=\".9\"/><circle cx=\"31.6\" cy=\"49.6\" r=\".7\"/></g><g transform=\"rotate(18 32 5)\"><path d=\"M28.5 3h7v3.5h-7z\" fill=\"#FFFFFF\"/><path d=\"M28.5 3h7v3.5h-7z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/></g><path d=\"M29 22.6q-1 4-3 6M35 22.6q1 4 3.4 5\" fill=\"none\" stroke=\"#24345E\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"32\" cy=\"22.6\" r=\"1.4\" fill=\"#24345E\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><circle cx=\"27.6\" cy=\"32\" r=\"2.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.200000000000003\" cy=\"32.4\" r=\"0.9799999999999999\" fill=\"#2A1D12\"/><circle cx=\"36.4\" cy=\"32\" r=\"3.78\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"37\" cy=\"32.4\" r=\"1.323\" fill=\"#2A1D12\"/><path d=\"M24 27.4l4.6-1.6M34 25.6l5 1.4\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M26.6 37q5.4 6 10.8 0z\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\" stroke-linejoin=\"round\"/><path d=\"M32 37.2v2.8\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"0.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M25 43h10l-1.4 2 1.6 1.6-1.6 1.8 1.4 2.2-10-1.4z\" fill=\"#FBF6E6\" stroke=\"#2A1D12\" stroke-width=\"1.2\" stroke-linejoin=\"round\" transform=\"rotate(-8 25 43)\"/></svg>","cima":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M23 11h18a3 3 0 0 1 3 3v24h-24V14a3 3 0 0 1 3-3z\" fill=\"#4B6F8F\"/><path d=\"M23 11h18a3 3 0 0 1 3 3v24h-24V14a3 3 0 0 1 3-3z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><rect x=\"20\" y=\"5\" width=\"24\" height=\"6.4\" rx=\"3.2\" fill=\"#D9534F\" stroke=\"#2A1D12\" stroke-width=\"1.6\"/><path d=\"M26 5.2v6M38 5.2v6\" fill=\"none\" stroke=\"#A33A36\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M16 5l7 7\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"3.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M16 5l7 7\" fill=\"none\" stroke=\"#9AA3AD\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M12.6 6.8l4.8-4.6 2 1.4-4.6 4.8z\" fill=\"#9AA3AD\"/><path d=\"M12.6 6.8l4.8-4.6 2 1.4-4.6 4.8z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M44 40q6-4 8-14\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M44 40q6-4 8-14\" fill=\"none\" stroke=\"#E8742A\" stroke-width=\"3\" stroke-linecap=\"round\"/><path d=\"M53 30V6\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M53 7l9 3.6-9 3.6z\" fill=\"#E8742A\"/><path d=\"M53 7l9 3.6-9 3.6z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M54.4 12.4l2-2.4 1.6 1.6\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"0.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"52.4\" cy=\"27.4\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M20 40q-6 2-7 9\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"7\" stroke-linecap=\"round\"/><path d=\"M20 40q-6 2-7 9\" fill=\"none\" stroke=\"#E8742A\" stroke-width=\"3\" stroke-linecap=\"round\"/><circle cx=\"13\" cy=\"49.6\" r=\"2.6\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.5\"/><path d=\"M28.8 16h6.4v5c6.8 2 6.8 6 6.8 10V53a3 3 0 0 1-3 3h-14a3 3 0 0 1-3-3V31c0-4 0-8 6.8-10z\" fill=\"#2F5D46\"/><path d=\"M28.8 16h6.4v5c6.8 2 6.8 6 6.8 10V53a3 3 0 0 1-3 3h-14a3 3 0 0 1-3-3V31c0-4 0-8 6.8-10z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M24.4 20q0-8.4 7.6-8.4t7.6 8.4z\" fill=\"#F2C230\"/><path d=\"M24.4 20q0-8.4 7.6-8.4t7.6 8.4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M23.4 20.2h17.2\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><circle cx=\"32\" cy=\"16\" r=\"1.8\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1\"/><circle cx=\"28.4\" cy=\"33\" r=\"2.5\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"29\" cy=\"33.4\" r=\"1.125\" fill=\"#2A1D12\"/><circle cx=\"35.6\" cy=\"33\" r=\"2.5\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.2\" cy=\"33.4\" r=\"1.125\" fill=\"#2A1D12\"/><circle cx=\"25.6\" cy=\"37\" r=\"1.5\" fill=\"#EC8F7C\" opacity=\".8\"/><circle cx=\"38.4\" cy=\"37\" r=\"1.5\" fill=\"#EC8F7C\" opacity=\".8\"/><path d=\"M29.6 37.4q2.4 2 4.8 0\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M22.6 45h18.8v8.6a2.4 2.4 0 0 1-2.4 2.4H25a2.4 2.4 0 0 1-2.4-2.4z\" fill=\"#E8742A\"/><path d=\"M22.6 45h18.8v8.6a2.4 2.4 0 0 1-2.4 2.4H25a2.4 2.4 0 0 1-2.4-2.4z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><path d=\"M23 50.4h18\" fill=\"none\" stroke=\"#B9551A\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M32 45v11\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M24.6 31v14M39.4 31v14\" fill=\"none\" stroke=\"#34506A\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/></svg>","litri":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><defs><linearGradient id=\"l\" x2=\"1\" y2=\"1\"><stop stop-color=\"#fff\" stop-opacity=\".55\"/><stop offset=\".5\" stop-color=\"#fff\" stop-opacity=\"0\"/><stop offset=\"1\" stop-color=\"#2A1D12\" stop-opacity=\".22\"/></linearGradient></defs><path d=\"M29 5h6v11c6 3 9 7 9 13v24a3 3 0 0 1-3 3H23a3 3 0 0 1-3-3V29c0-6 3-10 9-13z\" fill=\"#6B3D12\"/><path d=\"M29 5h6v11c6 3 9 7 9 13v24a3 3 0 0 1-3 3H23a3 3 0 0 1-3-3V29c0-6 3-10 9-13z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><g transform=\"rotate(-20 33 4)\"><path d=\"M28 1h9v3.5h-9z\" fill=\"#F2C230\"/><path d=\"M28 1h9v3.5h-9z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/></g><path d=\"M21 36h22v13h-22z\" fill=\"#EFE7CF\"/><path d=\"M21 36h22v13h-22z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><text x=\"31\" y=\"46.5\" text-anchor=\"middle\" font-family=\"Arial Black,Arial\" font-weight=\"900\" font-size=\"7\" fill=\"#5A5040\">1 L</text><path d=\"M30 48h11v4h-11z\" fill=\"#D9534F\"/><path d=\"M30 48h11v4h-11z\" fill=\"url(#l)\" stroke=\"#2A1D12\" stroke-width=\"2\" stroke-linejoin=\"round\"/><circle cx=\"28\" cy=\"25\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"28.6\" cy=\"25.4\" r=\"1.35\" fill=\"#2A1D12\"/><path d=\"M24.5 21.5h7v3.6h-7z\" fill=\"#7A4818\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><circle cx=\"36\" cy=\"25\" r=\"3\" fill=\"#FFFFFF\" stroke=\"#2A1D12\" stroke-width=\"1.4\"/><circle cx=\"36.6\" cy=\"25.4\" r=\"1.35\" fill=\"#2A1D12\"/><path d=\"M32.5 21.5h7v3.6h-7z\" fill=\"#7A4818\" stroke=\"#2A1D12\" stroke-width=\"1.2\"/><path d=\"M28 31q3 1.5 7-1\" fill=\"none\" stroke=\"#2A1D12\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M35 30l6-3\" fill=\"none\" stroke=\"#E8C98A\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"1\"/><path d=\"M50 8.5l1 2.4 2.4 1l-2.4 1l-1 2.4l-1 -2.4l-2.4 -1l2.4 -1z\" fill=\"#F2C230\"/><path d=\"M13 17.5l0.8 1.8 1.8 0.8l-1.8 0.8l-0.8 1.8l-0.8 -1.8l-1.8 -0.8l1.8 -0.8z\" fill=\"#F2C230\"/></svg>"}};
+DATOS = DATOS || {};
+const enApp = !!window.ReactNativeWebView;
+function enviar(m) { if (enApp) window.ReactNativeWebView.postMessage(JSON.stringify(m)); }
+const FIGURAS = DATOS.figuras || {};
+
+// ===== Ajustes (todo dinámico: en la app saldrían de la configuración, con estos valores por defecto) =====
+const ARRIMA_CFG = {
+  jugadores: 2,
+  puntosParaGanar: 5,
+  nivel: 'normal',          // los vecinos de la máquina: 'tranquilo' · 'normal' · 'listo'
+  chapasPorJugador: { 2: 3, 3: 2, 4: 2 },   // por ronda: rondas de menos de un minuto
+  fuerzaMax: 13,            // velocidad máxima de un lanzamiento (unidades de la mesa por paso)
+  arrastreMax: 150,         // lo que hay que arrastrar para el 100 %
+  rozamiento: 0.976,        // cuánto frena la mesa en cada paso
+  rebote: 0.6,              // lo que conservan al chocar con los lados
+  premioChapas: 5,          // lo que da ganar a una persona (en la app: tope por partida, como los demás juegos)
+  premioModoDos: 0.5,       // factor si TODOS los asientos son personas (gane quien gane): como Chapa-Gol
+  segundosTurno: 20,        // si quien tiene el turno no lanza en este tiempo, sale un tiro flojito (0 = nunca)
+  pausaMaquina: 900,        // ms que apunta un vecino de la máquina
+  avisoTurnoMs: 900,        // lo que dura el nombre grande al cambiar de turno
+  pausaRonda: 2400,         // ms para ver quién puntúa antes de la siguiente ronda
+  pasosMax: 900,            // seguro: si algo sigue rodando tras tantos pasos (~7 s), se para todo
+};
+const NIVELES = {
+  tranquilo: { angulo: 0.09, fuerza: 0.18, bochar: 0.2 },
+  normal:    { angulo: 0.045, fuerza: 0.09, bochar: 0.5 },
+  listo:     { angulo: 0.02, fuerza: 0.04, bochar: 0.8 },
+};
+const ASIENTOS = [
+  { fig: 'jarron', color: '#E9A52C', vecino: 'Jarrón' },
+  { fig: 'congelada', color: '#8CC9EA', vecino: 'La Congelada' },
+  { fig: 'kevin', color: '#D9534F', vecino: 'El Chafao' },
+  { fig: 'cero', color: '#74C27A', vecino: 'La Cero' },
+];
+const FRASES = {
+  inicio: ['(susurro) Hola. Soy Chapas. Hoy arbitro yo.', '(susurro) Arrimad al guisante. Lo que se caiga… es mío.'],
+  cerca: ['(susurro) Uf. Pegadita.', '(susurro) Eso es arrimar.', '(susurro) Huele a punto.'],
+  lejos: ['(susurro) Bueno. La intención es lo que cuenta.', '(susurro) Se ha quedado a medio pueblo.'],
+  bochazo: ['(susurro) ¡Clac! Bochazo.', '(susurro) Fuera de ahí, chapa ajena.', '(susurro) Eso ha dolido. A la chapa.'],
+  cae: ['(susurro) Tengo su chapa.', '(susurro) Al suelo. Para mi colección.', '(susurro) Ésa ya es mía.'],
+  corta: ['(susurro) Ni ha pasado la raya. Me la quedo.'],
+  guisanteCae: ['(susurro) Se ha caído el guisante. Ronda nula. Él está bien. Creo.'],
+  ronda: ['(susurro) Ronda para {n}.', '(susurro) {n} se lleva la ronda. Yo me llevo las chapas.'],
+  nadie: ['(susurro) No queda ninguna en la mesa. Ronda nula. Qué bien huelen.'],
+  maquina: ['(susurro) Apunta {n}…', '(susurro) {n} se concentra. Silencio.'],
+  tiempo: ['(susurro) Se acabó el tiempo. Tiro yo, flojito.'],
+  fin: ['(susurro) Estoy bien. Gracias por preguntar.', '(susurro) Buena partida. Las chapas del suelo no se devuelven.'],
+};
+
+// ==LOGICA== (pura, sin pantalla: la prueba la carga con new Function)
+/** Quién puntúa: la chapa más cerca del guisante y, de ese jugador, cuántas antes de la mejor del resto. */
+function puntuar(chapas, g) {
+  if (!chapas.length) return null;
+  const orden = chapas.map((c) => ({ eq: c.eq, d: Math.hypot(c.x - g.x, c.y - g.y) })).sort((a, b) => a.d - b.d);
+  const quien = orden[0].eq;
+  let n = 0;
+  for (const c of orden) { if (c.eq !== quien) break; n++; }
+  return { quien, n };
+}
+/** Hasta dónde llega una chapa lanzada a velocidad v (la mesa frena multiplicando por r en cada paso). */
+function alcance(v, r) { let d = 0; while (v >= 0.04) { d += v; v *= r; } return d; }
+/** La velocidad para recorrer `dist` (lo inverso de alcance). */
+function velocidadPara(dist, r) { let a = 0, b = 40; for (let k = 0; k < 40; k++) { const m = (a + b) / 2; if (alcance(m, r) < dist) a = m; else b = m; } return (a + b) / 2; }
+/** El orden de tiro de una ronda: cada uno una chapa, por turnos, empezando por `empieza`. */
+function ordenRonda(n, porJugador, empieza) { const o = []; for (let k = 0; k < n * porJugador; k++) o.push((empieza + k) % n); return o; }
+// ==/LOGICA==
+
+// ===== Jugadores =====
+let jugadores = [];
+const tipos = ['persona', 'persona', 'maquina', 'maquina'];   // por defecto, «2 en este móvil»
+let nombres = ['', '', '', ''];
+try { nombres = JSON.parse(localStorage.getItem('arrima:nombres')) || nombres; } catch (e) { /* sin almacenamiento */ }
+function guardarNombres() { try { localStorage.setItem('arrima:nombres', JSON.stringify(nombres)); } catch (e) { /* nada */ } }
+function nombreDe(k) { return tipos[k] === 'maquina' ? ASIENTOS[k].vecino : (nombres[k] || '').trim() || 'Jugador ' + (k + 1); }
+function premioActual() {
+  const todos = tipos.slice(0, ARRIMA_CFG.jugadores).every((t) => t === 'persona');
+  return Math.round(ARRIMA_CFG.premioChapas * (todos ? ARRIMA_CFG.premioModoDos : 1));
+}
+
+// ===== Mesa (unidades lógicas; se escala a la pantalla) =====
+const W = 340, H = 560, RAYA = H - 100, RC = 16, RB = 9, SALIDA = { x: W / 2, y: H - 46 };
+const lienzo = document.getElementById('lienzo'), ctx = lienzo.getContext('2d');
+const azar = (a) => a[Math.floor(Math.random() * a.length)];
+const imgs = {};
+for (const id of Object.keys(FIGURAS)) { const im = new Image(); im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(FIGURAS[id]); imgs[id] = im; }
+const src = (id) => (imgs[id] ? imgs[id].src : '');
+document.querySelectorAll('[data-fig]').forEach((el) => { el.src = src(el.dataset.fig); });
+function decir(texto) { document.getElementById('b-texto').textContent = texto; document.getElementById('b-fig').src = src('chapas'); }
+function pie(html) { document.getElementById('pie').innerHTML = html; }
+function escapar(s) { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+let cuerpos = [], guisante = null, puntos = [], orden = [], paso = 0, empieza = 0, estado = 'portada';
+let pasos = 0, lanzada = null, choco = false, arrastre = null, resultado = null;
+let aviso = null, avisoColor = '#fff', avisoHasta = 0, reloj = null, restante = 0, temporizador = null;
+const turno = () => orden[paso];
+
+function quedanDe(k) { let n = 0; for (let i = paso; i < orden.length; i++) if (orden[i] === k) n++; return n; }
+function pintarMarcador() {
+  const caja = document.getElementById('marcador'); caja.innerHTML = ''; caja.classList.toggle('cuatro', jugadores.length >= 4);
+  jugadores.forEach((j, k) => {
+    const toca = estado === 'jugando' && k === turno();
+    const d = document.createElement('div');
+    d.className = 'ficha' + (toca ? ' toca' : ''); d.style.borderColor = toca ? j.color : 'transparent';
+    d.innerHTML = `<img src="${src(j.fig)}" alt=""><span class="txt"><span class="nom"></span><span class="quedan"></span></span><span class="pts">${puntos[k] || 0}</span>`;
+    d.querySelector('.nom').textContent = j.nombre; d.querySelector('.nom').style.color = j.color;
+    const q = d.querySelector('.quedan'); q.textContent = '●'.repeat(quedanDe(k)); q.style.color = j.color;
+    caja.appendChild(d);
+  });
+  document.getElementById('meta').textContent = 'a ' + ARRIMA_CFG.puntosParaGanar;
+}
+function textoPie() {
+  const j = jugadores[turno()];
+  if (j.tipo === 'maquina') return `Lanza <b style="color:${j.color}">${j.nombre}</b>…`;
+  const t = restante > 0 && restante <= 10 ? ` · ${restante} s` : '';
+  return `<b style="color:${j.color}">Turno de ${escapar(j.nombre)}</b>: arrastra hacia atrás y suelta${t}`;
+}
+
+// ===== Rondas y turnos =====
+function pararReloj() { if (reloj) { clearInterval(reloj); reloj = null; } restante = 0; if (temporizador) { clearTimeout(temporizador); temporizador = null; } }
+function empezarRonda() {
+  cuerpos = []; resultado = null;
+  guisante = { x: 70 + Math.random() * (W - 140), y: 90 + Math.random() * 190, vx: 0, vy: 0, r: RB, m: 0.6, eq: -1 };
+  cuerpos.push(guisante);
+  orden = ordenRonda(jugadores.length, ARRIMA_CFG.chapasPorJugador[jugadores.length] || 2, empieza); paso = 0;
+  estado = 'jugando'; anunciarTurno();
+}
+function anunciarTurno() {
+  pararReloj();
+  const j = jugadores[turno()];
+  aviso = j.nombre; avisoColor = j.color; avisoHasta = performance.now() + ARRIMA_CFG.avisoTurnoMs;
+  pintarMarcador(); pie(textoPie());
+  if (j.tipo === 'maquina') {
+    decir(azar(FRASES.maquina).replace('{n}', j.nombre));
+    temporizador = setTimeout(() => { temporizador = null; if (estado === 'jugando') tiroMaquina(); }, ARRIMA_CFG.pausaMaquina);
+    return;
+  }
+  if (ARRIMA_CFG.segundosTurno > 0) {
+    restante = ARRIMA_CFG.segundosTurno;
+    reloj = setInterval(() => {
+      restante--;
+      if (restante <= 0) { pararReloj(); decir(FRASES.tiempo[0]); lanzar(-Math.PI / 2, velocidadPara((SALIDA.y - guisante.y) * 0.6, ARRIMA_CFG.rozamiento)); return; }
+      pie(textoPie());
+    }, 1000);
+  }
+}
+function lanzar(ang, v) {
+  if (estado !== 'jugando') return;
+  pararReloj();
+  v = Math.max(0, Math.min(v, ARRIMA_CFG.fuerzaMax));
+  lanzada = { x: SALIDA.x, y: SALIDA.y, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v, r: RC, m: 1, eq: turno() };
+  cuerpos.push(lanzada); choco = false; estado = 'moviendo'; aviso = null; pasos = 0;
+}
+function tiroMaquina() {
+  const nv = NIVELES[ARRIMA_CFG.nivel] || NIVELES.normal, yo = turno(), r = ARRIMA_CFG.rozamiento;
+  const ruido = () => (Math.random() * 2 - 1);
+  const chapas = cuerpos.filter((c) => c.eq >= 0);
+  const p = puntuar(chapas, guisante);
+  let objetivo, extra = 0;
+  if (p && p.quien !== yo && Math.random() < nv.bochar) {
+    // bochar: a por la más cercana del rival, con fuerza de sobra
+    const rival = chapas.filter((c) => c.eq === p.quien).sort((a, b) => Math.hypot(a.x - guisante.x, a.y - guisante.y) - Math.hypot(b.x - guisante.x, b.y - guisante.y))[0];
+    objetivo = rival; extra = 110;
+  } else {
+    // arrimar: quedarse justo delante del guisante
+    const ux = guisante.x - SALIDA.x, uy = guisante.y - SALIDA.y, d = Math.hypot(ux, uy);
+    objetivo = { x: guisante.x - ux / d * (RB + RC + 2), y: guisante.y - uy / d * (RB + RC + 2) };
+  }
+  const dist = Math.hypot(objetivo.x - SALIDA.x, objetivo.y - SALIDA.y) + extra;
+  const ang = Math.atan2(objetivo.y - SALIDA.y, objetivo.x - SALIDA.x) + ruido() * nv.angulo;
+  lanzar(ang, velocidadPara(dist, r) * (1 + ruido() * nv.fuerza));
+}
+function trasLanzar() {
+  // lo que no ha pasado la raya, a la colección de Chapas
+  const j = lanzada;
+  if (cuerpos.includes(j) && j.y > RAYA) { cuerpos = cuerpos.filter((c) => c !== j); decir(FRASES.corta[0]); }
+  else if (cuerpos.includes(j)) {
+    const d = Math.hypot(j.x - guisante.x, j.y - guisante.y);
+    if (choco) decir(azar(FRASES.bochazo)); else if (d < 34) decir(azar(FRASES.cerca)); else if (d > 130) decir(azar(FRASES.lejos));
+  }
+  lanzada = null; paso++;
+  if (paso < orden.length) { estado = 'jugando'; anunciarTurno(); return; }
+  finRonda();
+}
+function finRonda() {
+  estado = 'ronda';
+  const p = puntuar(cuerpos.filter((c) => c.eq >= 0), guisante);
+  resultado = p;
+  if (!p) { decir(FRASES.nadie[0]); pie('Ronda nula: no queda ninguna chapa en la mesa'); }
+  else {
+    pie(`Recuento: <b style="color:${jugadores[p.quien].color}">${escapar(jugadores[p.quien].nombre)} +${p.n}</b> · la raya marca las chapas que puntúan`);
+    puntos[p.quien] += p.n;
+    const j = jugadores[p.quien];
+    aviso = `+${p.n} ${j.nombre}`; avisoColor = j.color; avisoHasta = performance.now() + ARRIMA_CFG.pausaRonda - 300;
+    decir(azar(FRASES.ronda).replace('{n}', j.nombre));
+    if (enApp) enviar({ tipo: 'vibrar' }); else if (navigator.vibrate) navigator.vibrate(30);
+  }
+  pintarMarcador();
+  temporizador = setTimeout(() => {
+    temporizador = null;
+    if (puntos.some((n) => n >= ARRIMA_CFG.puntosParaGanar)) return fin();
+    empieza = (empieza + 1) % jugadores.length; empezarRonda();
+  }, ARRIMA_CFG.pausaRonda);
+}
+function rondaNula() {
+  estado = 'ronda'; decir(FRASES.guisanteCae[0]); resultado = null; pie('Ronda nula: el guisante se ha caído');
+  temporizador = setTimeout(() => { temporizador = null; empezarRonda(); }, ARRIMA_CFG.pausaRonda);
+}
+function fin() {
+  estado = 'fin'; pararReloj();
+  const max = Math.max(...puntos), k = puntos.indexOf(max), g = jugadores[k];
+  const premio = premioActual(), ganaPersona = g.tipo === 'persona';
+  document.getElementById('f-fig').src = src(g.fig);
+  document.getElementById('f-titulo').textContent = '¡Gana ' + g.nombre + '!';
+  const lista = document.getElementById('f-lista'); lista.innerHTML = '';
+  jugadores.map((j, i) => [j, puntos[i]]).sort((a, b) => b[1] - a[1]).forEach(([j, n]) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="punto" style="background:${j.color}"></span><span></span><b>${n}</b>`;
+    li.children[1].textContent = j.nombre; lista.appendChild(li);
+  });
+  const frase = `Chapas: «${azar(FRASES.fin)}»`;
+  document.getElementById('f-texto').innerHTML = ganaPersona && premio > 0 ? `${frase} <b>+${premio} chapas</b> al monedero.` : frase;
+  if (ganaPersona && premio > 0) enviar({ tipo: 'chapas', n: premio });
+  enviar({ tipo: 'fin' }); // acabar la partida también suma a la Copa, gane o pierda (JuegoEnWeb; supabase/dev/90)
+  document.getElementById('final').classList.add('ver');
+}
+
+// ===== Física =====
+function pasoFisica() {
+  for (const b of cuerpos.slice()) {
+    b.x += b.vx; b.y += b.vy;
+    b.vx *= ARRIMA_CFG.rozamiento; b.vy *= ARRIMA_CFG.rozamiento;
+    if (Math.hypot(b.vx, b.vy) < 0.04) { b.vx = 0; b.vy = 0; }
+    if (b.x - b.r < 0) { b.x = b.r; b.vx = -b.vx * ARRIMA_CFG.rebote; }
+    if (b.x + b.r > W) { b.x = W - b.r; b.vx = -b.vx * ARRIMA_CFG.rebote; }
+    if (b.y + b.r > H) { b.y = H - b.r; b.vy = -b.vy * ARRIMA_CFG.rebote; }
+    if (b.y < 0) {   // se cae por el borde de arriba de la mesa
+      cuerpos = cuerpos.filter((c) => c !== b);
+      if (b === guisante) return rondaNula();
+      decir(azar(FRASES.cae));
+    }
+  }
+  for (let i = 0; i < cuerpos.length; i++) for (let j = i + 1; j < cuerpos.length; j++) choque(cuerpos[i], cuerpos[j]);
+}
+function choque(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = a.r + b.r;
+  if (d === 0 || d >= min) return;
+  const nx = dx / d, ny = dy / d, solape = min - d, tm = a.m + b.m;
+  a.x -= nx * solape * (b.m / tm); a.y -= ny * solape * (b.m / tm);
+  b.x += nx * solape * (a.m / tm); b.y += ny * solape * (a.m / tm);
+  const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+  if (rv > 0) return;
+  const j = -(1 + 0.85) * rv / (1 / a.m + 1 / b.m);
+  a.vx -= j * nx / a.m; a.vy -= j * ny / a.m; b.vx += j * nx / b.m; b.vy += j * ny / b.m;
+  if ((a === lanzada || b === lanzada) && a.eq >= 0 && b.eq >= 0 && a.eq !== b.eq && -rv > 2) choco = true;
+}
+const quieto = () => cuerpos.every((b) => b.vx === 0 && b.vy === 0);
+
+// ===== El dedo: se arrastra desde cualquier sitio; la chapa sale al revés del arrastre =====
+let escala = 1, ox = 0, oy = 0;
+function aMesa(e) { const r = lienzo.getBoundingClientRect(); return { x: (e.clientX - r.left - ox) / escala, y: (e.clientY - r.top - oy) / escala }; }
+const puedeTocar = () => estado === 'jugando' && jugadores[turno()].tipo === 'persona';
+lienzo.addEventListener('pointerdown', (e) => { if (!puedeTocar()) return; const p = aMesa(e); arrastre = { a: p, p }; lienzo.setPointerCapture(e.pointerId); });
+lienzo.addEventListener('pointermove', (e) => { if (arrastre) arrastre.p = aMesa(e); });
+lienzo.addEventListener('pointerup', () => {
+  if (!arrastre) return;
+  const { a, p } = arrastre; arrastre = null;
+  if (!puedeTocar()) return;
+  const dx = a.x - p.x, dy = a.y - p.y, d = Math.hypot(dx, dy);
+  if (d < 12) { pie('Arrastra más: <b>hacia atrás</b>, cuanto más largo, más fuerte'); return; }
+  if (dy > -4) { pie('Hacia <b>atrás</b> (hacia ti): la chapa sale hacia el guisante'); return; }
+  lanzar(Math.atan2(dy, dx), Math.min(d, ARRIMA_CFG.arrastreMax) / ARRIMA_CFG.arrastreMax * ARRIMA_CFG.fuerzaMax);
+});
+
+// ===== Dibujo =====
+function medir() {
+  const r = lienzo.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  lienzo.width = r.width * dpr; lienzo.height = r.height * dpr;
+  escala = Math.min((r.width - 12) / W, (r.height - 8) / H);
+  ox = (r.width - W * escala) / 2; oy = (r.height - H * escala) / 2;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', medir);
+function dibujarMesa() {
+  ctx.fillStyle = '#9a6d3c'; ctx.fillRect(0, 0, W, H);
+  // tablones de la mesa de la terraza
+  for (let x = 0; x < W; x += 68) {
+    ctx.fillStyle = (x / 68) % 2 ? 'rgba(255,249,238,.05)' : 'rgba(42,29,18,.06)'; ctx.fillRect(x, 0, 68, H);
+    ctx.strokeStyle = 'rgba(42,29,18,.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  // el borde de arriba: por ahí se cae
+  const gr = ctx.createLinearGradient(0, 0, 0, 26); gr.addColorStop(0, 'rgba(15,10,6,.85)'); gr.addColorStop(1, 'rgba(15,10,6,0)');
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, 26);
+  ctx.font = "13px 'Gochi Hand', cursive"; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,249,238,.7)';
+  ctx.fillText('↑ borde: ¡al suelo! ↑', W / 2, 14);
+  // la zona de tiro y su raya de tiza
+  ctx.fillStyle = 'rgba(42,29,18,.28)'; ctx.fillRect(0, RAYA, W, H - RAYA);
+  ctx.strokeStyle = 'rgba(255,249,238,.85)'; ctx.lineWidth = 2.5; ctx.setLineDash([10, 7]);
+  ctx.beginPath(); ctx.moveTo(8, RAYA); ctx.lineTo(W - 8, RAYA); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = 'rgba(42,29,18,.9)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+}
+function dibujarChapa(x, y, j, alfa) {
+  ctx.save(); ctx.globalAlpha = alfa; ctx.translate(x, y);
+  ctx.beginPath(); ctx.ellipse(2, 3, RC, RC, 0, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill();
+  ctx.beginPath();
+  for (let i = 0; i <= 42; i++) { const a = i / 42 * Math.PI * 2, r = RC + (i % 2 ? -1.6 : 0.6); ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  ctx.fillStyle = j.color; ctx.fill(); ctx.strokeStyle = '#2a1d12'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, RC - 4, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,249,238,.55)'; ctx.fill();
+  const im = imgs[j.fig]; if (im && im.complete) ctx.drawImage(im, -RC - 1, -RC - 2, (RC + 1) * 2, (RC + 1) * 2);
+  ctx.restore();
+}
+function dibujarGuisante(b) {
+  ctx.beginPath(); ctx.arc(b.x + 2, b.y + 3, b.r, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fillStyle = '#7BBF4A'; ctx.fill();
+  ctx.strokeStyle = '#2a1d12'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.beginPath(); ctx.arc(b.x - 3, b.y - 3, 2.5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.fill();
+  ctx.fillStyle = '#2a1d12'; ctx.beginPath(); ctx.arc(b.x - 3, b.y, 1.4, 0, Math.PI * 2); ctx.arc(b.x + 3, b.y, 1.4, 0, Math.PI * 2); ctx.fill();
+}
+function dibujarFlecha(j) {
+  if (!arrastre) return;
+  const { a, p } = arrastre, dx = a.x - p.x, dy = a.y - p.y, d = Math.hypot(dx, dy);
+  if (d < 6) return;
+  const f = Math.min(d, ARRIMA_CFG.arrastreMax) / ARRIMA_CFG.arrastreMax, ux = dx / d, uy = dy / d;
+  if (dy > -4) { ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff9ee'; ctx.fillText('hacia atrás ↓', SALIDA.x, RAYA - 14); return; }
+  const largo = 30 + f * 120, ex = SALIDA.x + ux * largo, ey = SALIDA.y + uy * largo;
+  ctx.strokeStyle = j.color; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(SALIDA.x + ux * (RC + 3), SALIDA.y + uy * (RC + 3)); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ex + ux * 11, ey + uy * 11); ctx.lineTo(ex - uy * 10, ey + ux * 10); ctx.lineTo(ex + uy * 10, ey - ux * 10); ctx.closePath();
+  ctx.fillStyle = j.color; ctx.fill(); ctx.strokeStyle = '#2a1d12'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#2a1d12';
+  const tx = Math.min(W - 30, Math.max(30, ex + ux * 26)), ty = ey + uy * 26 + 5;
+  ctx.strokeText(Math.round(f * 100) + ' %', tx, ty); ctx.fillStyle = '#fff9ee'; ctx.fillText(Math.round(f * 100) + ' %', tx, ty);
+}
+function marco(t) {
+  if (estado === 'moviendo') {
+    for (let k = 0; k < 2 && estado === 'moviendo'; k++) pasoFisica();
+    if (++pasos * 2 > ARRIMA_CFG.pasosMax) for (const b of cuerpos) { b.vx = 0; b.vy = 0; }
+    if (estado === 'moviendo' && quieto()) trasLanzar();
+  }
+  const r = lienzo.getBoundingClientRect();
+  ctx.clearRect(0, 0, r.width, r.height);
+  ctx.save(); ctx.translate(ox, oy); ctx.scale(escala, escala);
+  dibujarMesa();
+  // en el recuento, una raya del guisante a cada chapa que puntúa
+  if (estado === 'ronda' && resultado && guisante) {
+    const orden2 = cuerpos.filter((c) => c.eq >= 0).sort((a, b) => Math.hypot(a.x - guisante.x, a.y - guisante.y) - Math.hypot(b.x - guisante.x, b.y - guisante.y));
+    ctx.setLineDash([5, 5]); ctx.lineWidth = 3;
+    orden2.slice(0, resultado.n).forEach((c) => { ctx.strokeStyle = jugadores[c.eq].color; ctx.beginPath(); ctx.moveTo(guisante.x, guisante.y); ctx.lineTo(c.x, c.y); ctx.stroke(); });
+    ctx.setLineDash([]);
+  }
+  for (const b of cuerpos) if (b.eq >= 0) dibujarChapa(b.x, b.y, jugadores[b.eq], 1);
+  if (guisante && cuerpos.includes(guisante)) dibujarGuisante(guisante);
+  if (estado === 'jugando') {
+    const j = jugadores[turno()];
+    dibujarChapa(SALIDA.x, SALIDA.y, j, 1);
+    ctx.beginPath(); ctx.arc(SALIDA.x, SALIDA.y, RC + 6 + Math.sin(t / 220) * 2, 0, Math.PI * 2);
+    ctx.strokeStyle = j.color; ctx.lineWidth = 3; ctx.stroke();
+    if (!arrastre && j.tipo === 'persona') {
+      ctx.font = '700 13px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,249,238,.85)';
+      ctx.fillText('arrastra hacia abajo y suelta', SALIDA.x, H - 12);
+    }
+    dibujarFlecha(j);
+  }
+  ctx.restore();
+  if (aviso && performance.now() < avisoHasta) {
+    ctx.save(); ctx.translate(r.width / 2, r.height * 0.64); ctx.rotate(-0.06);
+    ctx.font = "50px 'Gochi Hand', cursive"; ctx.textAlign = 'center'; ctx.lineWidth = 8; ctx.strokeStyle = '#2a1d12';
+    const txt = aviso.length > 16 ? aviso.slice(0, 15) + '…' : aviso;
+    ctx.strokeText(txt, 0, 16); ctx.fillStyle = avisoColor; ctx.fillText(txt, 0, 16); ctx.restore();
+  } else aviso = null;
+  requestAnimationFrame(marco);
+}
+
+// ===== Portada =====
+function pintarAsientos() {
+  const caja = document.getElementById('asientos'); caja.innerHTML = '';
+  for (let k = 0; k < ARRIMA_CFG.jugadores; k++) {
+    const a = ASIENTOS[k], d = document.createElement('div');
+    d.className = 'asiento'; d.style.setProperty('--c', a.color);
+    d.innerHTML = `<img src="${src(a.fig)}" alt=""><input maxlength="12" autocomplete="off"><button class="tipo"></button>`;
+    const inp = d.querySelector('input'), bt = d.querySelector('.tipo'), maq = tipos[k] === 'maquina';
+    inp.value = maq ? a.vecino + ' (máquina)' : nombres[k]; inp.placeholder = 'Jugador ' + (k + 1); inp.disabled = maq;
+    inp.oninput = () => { nombres[k] = inp.value; guardarNombres(); };
+    bt.textContent = maq ? 'Máquina' : 'Persona'; bt.classList.toggle('maq', maq);
+    bt.onclick = () => {
+      if (tipos[k] === 'persona' && tipos.slice(0, ARRIMA_CFG.jugadores).filter((x) => x === 'persona').length === 1) return;
+      tipos[k] = tipos[k] === 'persona' ? 'maquina' : 'persona'; pintarPortada();
+    };
+    caja.appendChild(d);
+  }
+}
+function pintarPortada() {
+  document.querySelectorAll('.selector').forEach((s) => s.querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('si', String(ARRIMA_CFG[s.dataset.op]) === b.dataset.v)));
+  pintarAsientos();
+  document.getElementById('fila-nivel').style.display = tipos.slice(0, ARRIMA_CFG.jugadores).includes('maquina') ? 'flex' : 'none';
+  const pr = premioActual();
+  document.getElementById('p-premio').innerHTML = pr > 0 ? `Si gana una persona: <b>${pr}</b> chapas fijas al monedero.` : '';
+}
+document.querySelectorAll('.selector').forEach((s) => s.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  ARRIMA_CFG[s.dataset.op] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; pintarPortada();
+}));
+function empezar() {
+  pararReloj();
+  document.querySelectorAll('.capa').forEach((c) => c.classList.remove('ver'));
+  jugadores = [];
+  for (let k = 0; k < ARRIMA_CFG.jugadores; k++) jugadores.push({ ...ASIENTOS[k], tipo: tipos[k], nombre: nombreDe(k) });
+  puntos = jugadores.map(() => 0); empieza = 0;
+  medir(); empezarRonda(); decir(azar(FRASES.inicio));
+}
+document.getElementById('b-jugar').onclick = empezar;
+document.getElementById('b-otra').onclick = empezar;
+document.getElementById('b-menu').onclick = () => { pararReloj(); estado = 'portada'; document.getElementById('final').classList.remove('ver'); pintarPortada(); document.getElementById('portada').classList.add('ver'); };
+function salir() { pararReloj(); if (enApp) enviar({ tipo: 'salir' }); else { estado = 'portada'; document.getElementById('final').classList.remove('ver'); pintarPortada(); document.getElementById('portada').classList.add('ver'); } }
+document.getElementById('salir').onclick = salir;
+document.querySelectorAll('.salir-capa').forEach((b) => { b.onclick = salir; });
+
+pintarPortada(); decir('(susurro) Hola.'); medir(); requestAnimationFrame(marco);
+// Ganchos de prueba (capturas): #jugando (2 personas), #jugando-maquina (tú contra La Congelada), #demo (ronda a medias, 3 personas).
+if (location.hash === '#jugando') empezar();
+if (location.hash === '#jugando-maquina') { tipos[1] = 'maquina'; empezar(); }
+if (location.hash === '#demo') {
+  ARRIMA_CFG.jugadores = 3; tipos[2] = 'persona'; nombres = ['Ana', 'Luis', 'Marta']; empezar();
+  guisante.x = 150; guisante.y = 190; puntos = [2, 3, 1];
+  const mk = (x, y, eq) => cuerpos.push({ x, y, vx: 0, vy: 0, r: RC, m: 1, eq });
+  mk(178, 214, 0); mk(122, 168, 1); mk(240, 120, 2); paso = 3; pararReloj(); anunciarTurno(); pararReloj(); aviso = null;
+  arrastre = { a: { x: 170, y: 380 }, p: { x: 185, y: 470 } };
+}
+</script>
+</body>
+</html>
